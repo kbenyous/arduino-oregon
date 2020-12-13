@@ -1,8 +1,11 @@
+#include <Arduino.h>
+
 // Oregon V2 decoder modfied - Olivier Lebrun
 // Oregon V2 decoder added - Dominique Pierre
 // New code to decode OOK signals from weather sensors, etc.
 // 2010-04-11 <jcw@equi4.com> http://opensource.org/licenses/mit-license.php
 // $Id: ookDecoder.pde 5331 2010-04-17 10:45:17Z jcw $
+const byte interruptPin = 3;
 
 class DecodeOOK {
 protected:
@@ -115,7 +118,7 @@ class OregonDecoderV2 : public DecodeOOK {
         total_bits++;
         pos = total_bits >> 4;
         if (pos >= sizeof data) {
-            Serial.println("sizeof data");
+            //Serial.println("sizeof data");
             resetDecoder();
             return;
         }
@@ -218,42 +221,43 @@ byte channel(const byte* data)
 }
 void reportSerial (const char* s, class DecodeOOK& decoder)
 {
+
     byte pos;
     const byte* data = decoder.getData(pos);
-    Serial.print(s);
-    Serial.print(' ');
-    for (byte i = 0; i < pos; ++i) {
-        Serial.print(data[i] >> 4, HEX);
-        Serial.print(data[i] & 0x0F, HEX);
-    }
+    // Serial.print(s);
+    // Serial.print(' ');
+    // for (byte i = 0; i < pos; ++i) {
+    //     Serial.print(data[i] >> 4, HEX);
+    //     Serial.print(data[i] & 0x0F, HEX);
+    // }
 
     // Outside/Water Temp : THN132N,...
     if(data[0] == 0xEA && data[1] == 0x4C)
     {
-       Serial.print("[THN132N,...] Id:");
+       Serial.print("{\"Id\": \"");
        Serial.print(data[3], HEX);
-       Serial.print(" ,Channel:");
+       Serial.print("\", \"Channel\": \"");
        Serial.print(channel(data));
-       Serial.print(" ,temp:");
+       Serial.print("\", \"Temperature\": \"");
        Serial.print(temperature(data));
-       Serial.print(" ,bat:");
+       Serial.print("\", \"Battery\": \"");
        Serial.print(battery(data));
-       Serial.println();
+       Serial.println("\"}");
     }
     // Inside Temp-Hygro : THGR228N,...
     else if(data[0] == 0x1A && data[1] == 0x2D)
     {
-       Serial.print("[THGR228N,...] Id:");
+       Serial.print("{\"Id\": \"");
        Serial.print(data[3], HEX);
-       Serial.print(" ,Channel:");
+       Serial.print("\", \"Channel\": \"");
        Serial.print(channel(data));
-       Serial.print(" ,temp:");
+       Serial.print("\", \"Temperature\": \"");
        Serial.print(temperature(data));
-       Serial.print(" ,hum:");
+       Serial.print("\", \"Humidity\": \"");
        Serial.print(humidity(data));
-       Serial.print(" ,bat:");
+       Serial.print("\", \"Battery\": \"");
        Serial.print(battery(data));
-       Serial.println();
+       Serial.println("\"}");
     }
 
     decoder.resetDecoder();
@@ -262,8 +266,8 @@ void reportSerial (const char* s, class DecodeOOK& decoder)
 void setup ()
 {
     Serial.begin(115200);
-    Serial.println("\n[ookDecoder]");
-    attachInterrupt(1, ext_int_1, CHANGE);
+    //Serial.println("\n[ookDecoder]");
+    attachInterrupt(digitalPinToInterrupt(interruptPin), ext_int_1, CHANGE);
 
     //DDRE  &= ~_BV(PE5); //input with pull-up
     //PORTE &= ~_BV(PE5);

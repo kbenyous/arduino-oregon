@@ -1,11 +1,22 @@
 #include <Arduino.h>
+#include <Wire.h>
+
+#define I2C_SLAVE_ADDRESS 0x04
+#define ANTENNA_INTERRUPT_PIN  3
+#define OREGON_MAX_MESSAGE_SIZE 25
+
 
 // Oregon V2 decoder modfied - Olivier Lebrun
 // Oregon V2 decoder added - Dominique Pierre
 // New code to decode OOK signals from weather sensors, etc.
 // 2010-04-11 <jcw@equi4.com> http://opensource.org/licenses/mit-license.php
 // $Id: ookDecoder.pde 5331 2010-04-17 10:45:17Z jcw $
-const byte interruptPin = 3;
+
+byte weatherdata[3][OREGON_MAX_MESSAGE_SIZE];
+byte dataUpdated[3] = {false, false, false};
+byte dataLength[3] = {0,0,0};
+
+byte requestedChannel = 0;
 
 class DecodeOOK {
 protected:
@@ -219,62 +230,79 @@ byte channel(const byte* data)
 
      return channel;
 }
-void reportSerial (const char* s, class DecodeOOK& decoder)
-{
 
-    byte pos;
-    const byte* data = decoder.getData(pos);
-    // Serial.print(s);
-    // Serial.print(' ');
-    // for (byte i = 0; i < pos; ++i) {
-    //     Serial.print(data[i] >> 4, HEX);
-    //     Serial.print(data[i] & 0x0F, HEX);
-    // }
 
-    // Outside/Water Temp : THN132N,...
-    if(data[0] == 0xEA && data[1] == 0x4C)
-    {
-       Serial.print("{\"Id\": \"");
-       Serial.print(data[3], HEX);
-       Serial.print("\", \"Channel\": \"");
-       Serial.print(channel(data));
-       Serial.print("\", \"Temperature\": \"");
-       Serial.print(temperature(data));
-       Serial.print("\", \"Battery\": \"");
-       Serial.print(battery(data));
-       Serial.println("\"}");
+
+void handleRequestEvent(){
+    
+    if (requestedChannel!=0){
+        // Serial.print("Requested channel : ");
+        // Serial.println(requestedChannel);
+        if(dataUpdated[requestedChannel-1]){
+            Wire.write(weatherdata[requestedChannel-1],OREGON_MAX_MESSAGE_SIZE);
+            dataUpdated[requestedChannel-1] = false;
+        }
+    }   
+}
+
+void receiveEvent(int size){
+
+    if(size>0){
+        byte input= Wire.read();   
+        if(( input >0 )&&(input<=3)){
+            requestedChannel=input;
+        }
     }
-    // Inside Temp-Hygro : THGR228N,...
-    else if(data[0] == 0x1A && data[1] == 0x2D)
-    {
-       Serial.print("{\"Id\": \"");
-       Serial.print(data[3], HEX);
-       Serial.print("\", \"Channel\": \"");
-       Serial.print(channel(data));
-       Serial.print("\", \"Temperature\": \"");
-       Serial.print(temperature(data));
-       Serial.print("\", \"Humidity\": \"");
-       Serial.print(humidity(data));
-       Serial.print("\", \"Battery\": \"");
-       Serial.print(battery(data));
-       Serial.println("\"}");
-    }
+}
 
-    decoder.resetDecoder();
+void reportSerial (const byte* data, byte length){
+    for (byte i = 0; i <= length; i++) {
+        Serial.print(data[i] >> 4, HEX);
+        Serial.print(data[i] & 0x0F, HEX);
+    }
+    Serial.print(" ");
+    if( (data[0] == 0xEA && data[1] == 0x4C) || 
+        (data[0] == 0x1A && data[1] == 0x2D)){
+
+        Serial.print("{\"Id\": \"");
+        Serial.print(data[3], HEX);
+        Serial.print("\", \"Channel\": \"");
+        Serial.print(channel(data));
+        Serial.print("\", \"Temperature\": \"");
+        Serial.print(temperature(data));
+        if(data[0] == 0x1A && data[1] == 0x2D) {
+            Serial.print("\", \"Humidity\": \"");
+            Serial.print(humidity(data));
+        }        
+        Serial.print("\", \"Battery\": \"");
+        Serial.print(battery(data));
+        Serial.println("\"}");
+    }
+    
+}
+
+void updateWeatherData(byte channel,const byte* fromReadBuffer, byte length){
+    cli();
+    memcpy(weatherdata[channel-1], fromReadBuffer, length);
+    dataLength[channel-1] = length;
+    dataUpdated[channel-1] = true;
+    sei(); 
 }
 
 void setup ()
 {
-    Serial.begin(115200);
-    //Serial.println("\n[ookDecoder]");
-    attachInterrupt(digitalPinToInterrupt(interruptPin), ext_int_1, CHANGE);
+    Wire.begin(0x04);
 
-    //DDRE  &= ~_BV(PE5); //input with pull-up
-    //PORTE &= ~_BV(PE5);
+    Serial.begin(115200);
+
+    attachInterrupt(digitalPinToInterrupt(ANTENNA_INTERRUPT_PIN), ext_int_1, CHANGE);
+    Wire.onRequest(handleRequestEvent);
+    Wire.onReceive(receiveEvent);
+
 }
 
 void loop () {
-    static int i = 0;
+    
     cli();
     word p = pulse;
 
@@ -283,7 +311,16 @@ void loop () {
 
     if (p != 0)
     {
-        if (orscV2.nextPulse(p))
-            reportSerial("OSV2", orscV2);
+        if (orscV2.nextPulse(p)){
+            byte datalength;
+            const byte* data = orscV2.getData(datalength);            
+            
+            byte chan =channel(data) ;
+            updateWeatherData(chan,data,datalength);
+            
+            orscV2.resetDecoder();
+            //reportSerial(weatherdata[chan-1],datalength);
+                                    
+        }
     }
 }
